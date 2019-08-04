@@ -27,6 +27,18 @@ variable "api_sources_ipv4" {
   description = "List of IPv4 CIDR blocks from which to allow API access"
 }
 
+variable "validator_node_sources_ipv4" {
+  type        = list(string)
+  description = "List of IPv4 CIDR blocks from which to allow Validator Node access"
+  default     = ["0.0.0.0/32"]
+}
+
+variable "validator_node_sources_ipv6" {
+  type        = list(string)
+  description = "List of IPv6 CIDR blocks from which to allow Validator Node access"
+  default     = ["::/128"]
+}
+
 variable "image_repo" {
   type        = string
   description = "Docker image repository to use for validator"
@@ -88,4 +100,9 @@ variable "prometheus_pagerduty_key" {
 variable "monitoring_snapshot" {
   default     = ""
   description = "EBS snapshot ID to initialise monitoring data with"
+}
+
+variable "validator_use_public_ip" {
+  type        = bool
+  default     = false
 }
