@@ -4,7 +4,7 @@ FROM debian:buster AS toolchain
 # docker build --build-arg https_proxy=http://fwdproxy:8080 --build-arg http_proxy=http://fwdproxy:8080
 
 RUN echo "deb http://deb.debian.org/debian buster-backports main" > /etc/apt/sources.list.d/backports.list \
-    && apt-get update && apt-get install -y protobuf-compiler/buster cmake curl clang git \
+    && apt-get update && apt-get install -y cmake curl clang git \
     && apt-get clean && rm -r /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
@@ -16,16 +16,50 @@ RUN rustup install $(cat rust-toolchain)
 
 FROM toolchain AS builder
 
-COPY . /libra
+# Do docker dependency only build
+# This uses a custom plugin that creates a "shadow" copy of the repository
+# that only includes the dependencies.
+# This allows us to cache the dependencies in a docker layer for faster builds.
 
-RUN cargo build --release -p libra-node -p client -p benchmark && cd target/release && rm -r build deps incremental
+# To generate new shadow check in, follow these steps:
+# 1) Install plugin:
+#    cargo install --force --git https://github.com/metajack/cargo-create-deponly-shadow
+# 2) Run it from the repo root to create shadow files:
+#    cargo create-deponly-shadow --output-dir docker/shadow
+# 
+# For now we will just run this periodically by hand
+
+# Copy shadow files into docker
+COPY docker/shadow /libra
+
+# Run shadow build using custom target-dir
+RUN cargo build --release --target-dir /tmp/docker-target -p libra-node
+
+# Cleanup just in case
+RUN rm -rf /libra/*
+
+# Copy in source and remove shadow files
+COPY . /libra
+RUN rm -rf docker/shadow
+
+# This is needed to force cargo to rebuild everything, otherwise
+# it sometimes thinks files are old and haven't changed
+# (The + tells find to use the maximum command line length)
+RUN find /libra -exec touch {} +
+
+
+# Do real final build
+RUN cargo build --release --target-dir /tmp/docker-target -p libra-node
+# Trim down image size
+RUN cd /tmp/docker-target/release && rm -rf build deps examples incremental
+
 
 ### Production Image ###
 FROM debian:buster AS prod
 
 RUN mkdir -p /opt/libra/bin /opt/libra/etc
 COPY docker/install-tools.sh /root
-COPY --from=builder /libra/target/release/libra-node /opt/libra/bin
+COPY --from=builder /tmp/docker-target/release/libra-node /opt/libra/bin
 
 # Admission control
 EXPOSE 8000
